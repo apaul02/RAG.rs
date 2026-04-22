@@ -1,0 +1,193 @@
+================================================================================
+DOCUMENT: Introduction to Distributed Systems
+Source: systems_notes.txt | Version: 2.1 | Last Updated: 2024-03-15
+Tags: [distributed-systems, networking, consistency, CAP-theorem]
+================================================================================
+
+## 1. What is a Distributed System?
+
+A distributed system is a collection of independent computers that appears to its
+users as a single coherent system. Unlike a monolithic system — where all components
+run on one machine — distributed systems spread computation across a network of nodes.
+
+Key properties every distributed system must handle:
+
+  * Concurrency: Multiple nodes operate simultaneously without coordination overhead.
+  * No global clock: Nodes can't perfectly synchronize time (see Lamport timestamps).
+  * Independent failures: Any node can fail at any time without warning.
+
+Think of systems like Google Search, Amazon's product catalog, or GitHub's code
+hosting — all of these rely on thousands of machines working in concert.
+
+--------------------------------------------------------------------------------
+
+## 2. The CAP Theorem (Brewer's Theorem)
+
+Formulated by Eric Brewer in 2000, the CAP theorem states that a distributed data
+store can only guarantee TWO of the following three properties at the same time:
+
+  (C) Consistency   — Every read receives the most recent write or an error.
+  (A) Availability  — Every request receives a (non-error) response.
+  (P) Partition Tol — The system continues despite network partitions.
+
+"In the presence of a network partition, you must choose between consistency
+and availability." — Eric Brewer, PODC Keynote 2000
+
+Real-world tradeoffs:
+  → CP systems (e.g. HBase, Zookeeper): sacrifice availability during partitions.
+  → AP systems (e.g. Cassandra, CouchDB): sacrifice consistency for uptime.
+  → CA systems: only possible if you never have a partition (i.e. single-node).
+
+Note: The CAP theorem has been refined by the PACELC model, which also considers
+latency (L) vs consistency (C) tradeoffs even when no partition (P) exists.
+
+--------------------------------------------------------------------------------
+
+## 3. Consistency Models
+
+3.1 Strong Consistency
+    After a write completes, all subsequent reads return that value. This is what
+    you expect from a single-threaded program. Expensive to achieve across nodes
+    because it requires coordination (e.g. two-phase commit, Paxos, Raft).
+
+3.2 Eventual Consistency
+    If no new updates are made, all replicas will *eventually* converge to the
+    same value. Used by DNS, Amazon DynamoDB (by default), and Apache Cassandra.
+    Formula for staleness window: Δt ≈ max(network_delay) + max(processing_lag)
+
+3.3 Causal Consistency
+    Operations that are causally related are seen in order. Concurrent operations
+    may be seen in any order. Weaker than strong, stronger than eventual.
+    Example: If Alice posts a message and Bob replies → Bob's reply must appear
+    after Alice's message on all nodes that have seen both.
+
+3.4 Read-Your-Writes (Session Consistency)
+    A client always sees its own writes reflected in subsequent reads — even if
+    those reads hit a different replica. Common in social media feeds & user prefs.
+
+--------------------------------------------------------------------------------
+
+## 4. Consensus Algorithms
+
+Achieving agreement among distributed nodes is called the *consensus problem*.
+It's famously hard — see the FLP impossibility result (Fischer, Lynch, Paterson,
+1985): "No deterministic algorithm can solve consensus in an async system where
+even one node can fail."
+
+### 4.1 Paxos
+Proposed by Leslie Lamport in "The Part-Time Parliament" (1989, published 1998).
+Phases:
+  Phase 1a — Prepare:   Proposer sends prepare(n) to majority of acceptors.
+  Phase 1b — Promise:   Acceptors respond with promise if n > any previous n.
+  Phase 2a — Accept:    Proposer sends accept(n, value) to acceptors.
+  Phase 2b — Accepted:  Acceptors write and notify learners.
+
+Paxos guarantees safety (agreement) but not liveness under all conditions.
+Multi-Paxos extends it for a sequence of decisions (i.e. a replicated log).
+
+### 4.2 Raft
+Designed by Ongaro & Ousterhout (2014) to be more understandable than Paxos.
+Key roles:
+  - Leader:    Handles all client requests; replicates log to followers.
+  - Follower:  Passive; responds to RPCs from leader and candidates.
+  - Candidate: Campaigns for leadership after election timeout (150–300ms).
+
+Election safety: at most ONE leader per term. Terms are monotonically increasing
+integers used to detect stale messages. If term(msg) < term(self) → reject.
+
+Used by: etcd, CockroachDB, TiKV, Consul.
+
+--------------------------------------------------------------------------------
+
+## 5. Data Replication Strategies
+
++---------------------------+----------------+------------------+--------------+
+| Strategy                  | Consistency    | Write Latency    | Read Latency |
++---------------------------+----------------+------------------+--------------+
+| Single-leader replication | Strong (leader)| Low (1 node)     | Low          |
+| Multi-leader replication  | Eventual       | Low (any leader) | Low          |
+| Leaderless (Dynamo-style) | Tunable (W+R>N)| Tunable          | Tunable      |
++---------------------------+----------------+------------------+--------------+
+
+Quorum condition for leaderless: W + R > N
+Where N = replication factor, W = write quorum, R = read quorum.
+Example: N=3, W=2, R=2 → W+R=4 > 3 ✓ (guarantees at least one overlapping node)
+
+Conflict resolution strategies:
+  • Last-Write-Wins (LWW): use wall-clock or logical timestamp. Simple, lossy.
+  • Version vectors: track per-replica version; detect concurrent writes.
+  • CRDTs (Conflict-free Replicated Data Types): data structures that merge
+    automatically. Examples: G-Counter, OR-Set, LWW-Register.
+
+--------------------------------------------------------------------------------
+
+## 6. Failure Detection
+
+Nodes detect failures using heartbeats + timeouts. But: network delays make it
+impossible to distinguish a *slow* node from a *dead* one. This is the core of
+the FLP impossibility result.
+
+Phi-Accrual Failure Detector (used by Akka, Cassandra):
+  φ(t) = -log₁₀(P_later(t - t_last))
+  Where P_later is the probability that the heartbeat arrives later than time t.
+  φ > threshold (usually 8–16) → suspect the node as failed.
+
+Gossip protocols propagate failure information in O(log N) rounds, where N is
+the cluster size. Each node selects k random peers per round and exchanges state.
+Time to full dissemination: O(log N / k) rounds.
+
+--------------------------------------------------------------------------------
+
+## 7. Clocks & Ordering
+
+7.1 Lamport Timestamps (logical clocks)
+    Rule: on any event, increment counter. On send, attach counter. On receive,
+    counter = max(local, received) + 1. Gives a total order, but can't detect
+    concurrency — two events with the same timestamp may be concurrent.
+
+7.2 Vector Clocks
+    Each node i maintains vector V where V[i] is its own counter, V[j] tracks
+    last known counter of node j. Allows detecting causality:
+      A → B iff V_A[i] ≤ V_B[i] ∀i AND ∃j: V_A[j] < V_B[j]
+    Used by: Amazon Dynamo, Riak.
+
+7.3 Hybrid Logical Clocks (HLC)
+    Combines physical time (NTP) with logical time to get globally unique,
+    monotonically increasing timestamps that are close to wall-clock time.
+    l.j = max(l.j, pt.j) where pt is physical time.
+    Used by: CockroachDB, YugabyteDB.
+
+--------------------------------------------------------------------------------
+
+## 8. Practical Notes & Gotchas
+
+  ⚠ Don't use System.currentTimeMillis() or time.time() for ordering events
+    across nodes — NTP can go backwards (slew correction up to ±500ppm).
+
+  ⚠ Network partitions are not rare in data centers. Studies show ~1–2% of
+    links in a large cluster experience failures per month (Gill et al., 2011).
+
+  ⚠ Split-brain: when a partition causes two leaders to believe they're the
+    primary. Solution: fencing tokens, STONITH (Shoot The Other Node In The Head).
+
+  ✓ Use idempotent operations wherever possible — retries become safe.
+  ✓ Design for partial failure: assume any call might time out, not just fail.
+  ✓ Read "Designing Data-Intensive Applications" by Martin Kleppmann. Essential.
+
+--------------------------------------------------------------------------------
+
+## References
+
+[1] Brewer, E. (2000). Towards Robust Distributed Systems. PODC Keynote.
+[2] Gilbert, S. & Lynch, N. (2002). Brewer's Conjecture and the Feasibility of
+    Consistent, Available, Partition-Tolerant Web Services. ACM SIGACT News.
+[3] Lamport, L. (1978). Time, Clocks, and the Ordering of Events in a Distributed
+    System. Communications of the ACM, 21(7), pp. 558–565.
+[4] Ongaro, D. & Ousterhout, J. (2014). In Search of an Understandable Consensus
+    Algorithm (Extended Version). USENIX ATC '14.
+[5] Fischer, M., Lynch, N., & Paterson, M. (1985). Impossibility of Distributed
+    Consensus with One Faulty Process. Journal of the ACM, 32(2), pp. 374–382.
+
+================================================================================
+END OF DOCUMENT
+================================================================================
