@@ -25,7 +25,18 @@ pub struct Content {
 
 #[derive(Serialize)]
 pub struct GeminiRequest {
+    pub model: String,
     pub content: Content,
+}
+
+#[derive(Serialize)]
+pub struct BatchEmbededRequest {
+    pub requests: Vec<GeminiRequest>,
+}
+
+#[derive(Deserialize)]
+pub struct BatchEmbededResponse {
+    pub embeddings: Vec<Embeddings>,
 }
 
 #[derive(Deserialize)]
