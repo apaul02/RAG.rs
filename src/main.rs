@@ -1,6 +1,7 @@
 pub mod chunker;
 pub mod embedder;
 pub mod models;
+pub mod search;
 
 use crate::chunker::ChunkContext;
 
@@ -20,6 +21,16 @@ async fn main() {
 
     for (chunk, vector) in chunker.finished_chunk.iter_mut().zip(res) {
         chunk.embeddings = Some(vector);
-        println!("{:?}", chunk.embeddings);
+    }
+    let query = "What happens if a network partition occurs?";
+    let query_res = crate::embedder::fetch_embedding(vec![query.to_string()], &api_key)
+        .await
+        .expect("Failed to embed query");
+    let query_vector = &query_res[0];
+
+    let top_results = crate::search::search(query_vector, &chunker.finished_chunk, 2);
+    println!("\n====SEARCH RESULTS====A");
+    for (i, chunk) in top_results.iter().enumerate() {
+        println!("\nResult {}: \n{}", i + 1, chunk.text);
     }
 }
