@@ -10,6 +10,11 @@ pub struct ChunkContext {
     pub finished_chunk: Vec<Chunk>,
 }
 
+impl Default for ChunkContext {
+    fn default() -> Self {
+        ChunkContext::new()
+    }
+}
 impl ChunkContext {
     pub fn new() -> Self {
         Self {
