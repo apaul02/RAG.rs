@@ -13,20 +13,35 @@ pub struct Chunk {
     pub embeddings: Option<Vec<f32>>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct Part {
     pub text: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct Content {
     pub parts: Vec<Part>,
+}
+
+#[derive(Deserialize)]
+pub struct Candidate {
+    pub content: Content,
+}
+
+#[derive(Deserialize)]
+pub struct GenerateResponse {
+    pub candidates: Vec<Candidate>,
 }
 
 #[derive(Serialize)]
 pub struct GeminiRequest {
     pub model: String,
     pub content: Content,
+}
+
+#[derive(Serialize)]
+pub struct LLMRequest {
+    pub contents: Vec<Content>,
 }
 
 #[derive(Serialize)]

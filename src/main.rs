@@ -1,5 +1,6 @@
 pub mod chunker;
 pub mod embedder;
+pub mod generator;
 pub mod models;
 pub mod search;
 
@@ -22,15 +23,26 @@ async fn main() {
     for (chunk, vector) in chunker.finished_chunk.iter_mut().zip(res) {
         chunk.embeddings = Some(vector);
     }
-    let query = "What happens if a network partition occurs?";
-    let query_res = crate::embedder::fetch_embedding(vec![query.to_string()], &api_key)
+
+    let question = "what is CAP";
+    let query_res = crate::embedder::fetch_embedding(vec![question.to_string()], &api_key)
         .await
         .expect("Failed to embed query");
     let query_vector = &query_res[0];
 
     let top_results = crate::search::search(query_vector, &chunker.finished_chunk, 2);
-    println!("\n====SEARCH RESULTS====A");
-    for (i, chunk) in top_results.iter().enumerate() {
-        println!("\nResult {}: \n{}", i + 1, chunk.text);
+    let mut all_results = String::new();
+    for result in top_results.iter() {
+        all_results.push_str(result.text.as_str());
     }
+    let prompt = format!(
+        "You are a helpful assistant. Answer the user's question using ONLY the context provided below \n\n {}\n\n QUESTION:\n{}",
+        all_results, question
+    );
+
+    let final_answer = crate::generator::generate_answer(&prompt, &api_key)
+        .await
+        .expect("Failed to generate response");
+    println!("\n====THE AI ANSWER====\n");
+    println!("{}", final_answer);
 }
